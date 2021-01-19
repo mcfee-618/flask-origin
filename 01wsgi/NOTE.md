@@ -54,18 +54,15 @@ wsgi基本处理模式为 ：  WSGI Server -> (WSGI Middleware)* -> WSGI Applica
 
 ## WSGI Server
 
+系统已经实现了一个简单的WSGI Server，下面是代码实现
+
 ```
 handler.run(self.server.get_app())
 
 def run(self, application):
-    """Invoke the application"""
-    # Note to self: don't move the close()!  Asynchronous servers shouldn't
-    # call close() from finish_response(), so if you close() anywhere but
-    # the double-error branch here, you'll break asynchronous servers by
-    # prematurely closing.  Async servers must return from 'run()' without
-    # closing if there might still be output to iterate over.
     try:
         self.setup_environ()
+        ## 调用application
         self.result = application(self.environ, self.start_response)
         self.finish_response()
     except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError):
@@ -93,10 +90,11 @@ def start_response(self, status, headers,exc_info=None):
             exc_info = None        # avoid dangling circular ref
     elif self.headers is not None:
         raise AssertionError("Headers already set!")
-
+    ## 设置状态码和响应头
     self.status = status
     self.headers = self.headers_class(headers)
     status = self._convert_string_type(status, "Status")
+    ## 合法性校验
     assert len(status)>=4,"Status must be at least 4 characters"
     assert status[:3].isdigit(), "Status message must begin w/3-digit code"
     assert status[3]==" ", "Status message must have a space after code"
@@ -130,10 +128,50 @@ def finish_response(self):
             self.result.close()
         raise
     else:
-        # We only call close() when no exception is raised, because it
         # will set status, result, headers, and environ fields to None.
-        # See bpo-29183 for more details.
         self.close()
+
+def write(self, data):
+    """'write()' callable as specified by PEP 3333"""
+
+    assert type(data) is bytes, \
+        "write() argument must be a bytes instance"
+
+    if not self.status:
+        raise AssertionError("write() before start_response()")
+
+    elif not self.headers_sent:
+        # Before the first output, send the stored headers
+        self.bytes_sent = len(data)    # make sure we know content-length
+        self.send_headers()
+    else:
+        self.bytes_sent += len(data)
+
+    # XXX check Content-Length and truncate if too many bytes written?
+    self._write(data)
+    self._flush()
+
+def send_headers(self):
+    """Transmit headers to the client, via self._write()"""
+    self.cleanup_headers()
+    self.headers_sent = True
+    if not self.origin_server or self.client_is_modern():
+        self.send_preamble()
+        self._write(bytes(self.headers))
+
+def send_preamble(self):
+    """Transmit version/status/date/server, via self._write()"""
+    if self.origin_server:
+        if self.client_is_modern():
+            self._write(('HTTP/%s %s\r\n' % (self.http_version,self.status)).encode('iso-8859-1'))
+            if 'Date' not in self.headers:
+                self._write(
+                    ('Date: %s\r\n' % format_date_time(time.time())).encode('iso-8859-1')
+                )
+            if self.server_software and 'Server' not in self.headers:
+                self._write(('Server: %s\r\n' % self.server_software).encode('iso-8859-1'))
+    else:
+        self._write(('Status: %s\r\n' % self.status).encode('iso-8859-1'))
 ```
 
 ## References
