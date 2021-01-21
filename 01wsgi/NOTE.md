@@ -178,3 +178,4 @@ def send_preamble(self):
 
 * https://my.oschina.net/u/4885730/blog/4802144
 * https://stackoverflow.com/questions/11926582/flask-wsgi-middleware-vs-before-and-after-request 
+* https://segmentfault.com/a/1190000011365430
